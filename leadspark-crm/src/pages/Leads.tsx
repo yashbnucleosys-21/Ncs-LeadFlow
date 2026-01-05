@@ -127,24 +127,28 @@ export default function Leads() {
     enabled: isCreateOpen && (formData.leadName !== '' || formData.companyName !== ''),
   });
 
-  // Check for draft on mount
+  // FIX: Added logic to check if draft is actually different from default to avoid empty popups
   useEffect(() => {
-    if (hasDraft('lead-create') && isAdmin) {
+    const draft = loadDraft<LeadFormData>('lead-create');
+    const isMeaningfulDraft = draft && (draft.leadName !== '' || draft.companyName !== '');
+    
+    if (isMeaningfulDraft && isAdmin && !isCreateOpen) {
       toast.info('You have an unsaved lead draft', {
         action: {
           label: 'Restore',
           onClick: () => {
-            const draft = loadDraft<LeadFormData>('lead-create');
             if (draft) {
               setFormData(draft);
               setIsCreateOpen(true);
             }
           },
         },
+        // Added onDismiss to clear draft if user ignores/closes the toast
+        onDismiss: () => clearDraft('lead-create'),
         duration: 5000,
       });
     }
-  }, [isAdmin]);
+  }, [isAdmin]); // Only run on mount to check for existing drafts
 
   useEffect(() => {
     fetchLeads();
@@ -212,8 +216,9 @@ export default function Leads() {
       console.error(error);
     } else {
       toast.success('Lead created successfully');
-      clearDraft('lead-create');
+      // FIX: Sequence of cleanup to prevent autosave from re-triggering
       setIsCreateOpen(false);
+      clearDraft('lead-create');
       setFormData(defaultFormData);
       fetchLeads();
     }
