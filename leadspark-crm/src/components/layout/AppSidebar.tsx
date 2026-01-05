@@ -48,11 +48,14 @@ export function AppSidebar() {
       <div className="flex items-center justify-between p-4 border-b border-sidebar-border">
         {!collapsed && (
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-xl from-sidebar-primary to-blue-600 flex items-center justify-center overflow-hidden">
+            {/* Added bg-gradient-to-br here */}
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center overflow-hidden">
               <img
-                src="/public/android-chrome-512x512.png"
+                src="/android-chrome-512x512.png"
                 alt="Logo"
-                className="w-8 h-8 object-contain"
+                className="w-7 h-7 object-contain"
+                // This ensures the image is treated as a block element
+                style={{ display: 'block' }}
               />
             </div>
             <span className="font-display font-bold text-lg text-sidebar-accent-foreground tracking-tight">
