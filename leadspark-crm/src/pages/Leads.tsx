@@ -100,9 +100,6 @@ export default function Leads() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isImportOpen, setIsImportOpen] = useState(false);
   
-  // FIX: State to track if we've already shown the restore toast in this session
-  const [hasCheckedDraft, setHasCheckedDraft] = useState(false);
-  
   // Bulk selection state
   const [selectedLeads, setSelectedLeads] = useState<Set<number>>(new Set());
   const [isBulkReassignOpen, setIsBulkReassignOpen] = useState(false);
@@ -130,13 +127,16 @@ export default function Leads() {
     enabled: isCreateOpen && (formData.leadName !== '' || formData.companyName !== ''),
   });
 
-  // Check for draft on mount - FIXED logic
+  // Check for draft on mount - Logic fixed to prevent recurring popup
   useEffect(() => {
-    if (hasDraft('lead-create') && isAdmin && !hasCheckedDraft) {
-      // Only show if the draft actually contains data
-      const draft = loadDraft<LeadFormData>('lead-create');
-      if (draft && (draft.leadName || draft.companyName)) {
+    const draft = loadDraft<LeadFormData>('lead-create');
+    // Strictly only show if there is actual content and the dialog is not already open
+    const hasActualContent = draft && (draft.leadName.trim() !== '' || draft.companyName.trim() !== '');
+    
+    if (hasActualContent && isAdmin && !isCreateOpen) {
+      const timer = setTimeout(() => {
         toast.info('You have an unsaved lead draft', {
+          id: 'restore-draft-toast', // Prevents duplicate toasts
           action: {
             label: 'Restore',
             onClick: () => {
@@ -144,12 +144,16 @@ export default function Leads() {
               setIsCreateOpen(true);
             },
           },
+          cancel: {
+            label: 'Discard',
+            onClick: () => clearDraft('lead-create'),
+          },
           duration: 5000,
         });
-      }
-      setHasCheckedDraft(true);
+      }, 1000); // Small delay to ensure page is settled
+      return () => clearTimeout(timer);
     }
-  }, [isAdmin, hasCheckedDraft]);
+  }, [isAdmin]);
 
   useEffect(() => {
     fetchLeads();
@@ -218,10 +222,10 @@ export default function Leads() {
     } else {
       toast.success('Lead created successfully');
       
-      // FIX: Order of operations to prevent autosave from triggering again
-      setIsCreateOpen(false); // 1. Close dialog (disables autosave hook)
-      clearDraft('lead-create'); // 2. Wipe localStorage
-      setFormData(defaultFormData); // 3. Reset state
+      // FIX: Strict cleanup sequence to prevent re-saving of stale data
+      setIsCreateOpen(false); // 1. Turn off the autosave hook immediately
+      setFormData(defaultFormData); // 2. Reset the local state to empty
+      clearDraft('lead-create'); // 3. Delete from localStorage
       
       fetchLeads();
     }
@@ -350,7 +354,13 @@ export default function Leads() {
               )}
               
               {isAdmin && (
-                <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+                <Dialog open={isCreateOpen} onOpenChange={(open) => {
+                  setIsCreateOpen(open);
+                  if (!open) {
+                    setFormData(defaultFormData);
+                    clearDraft('lead-create');
+                  }
+                }}>
                   <DialogTrigger asChild>
                     <Button>
                       <Plus className="w-4 h-4 mr-2" />
