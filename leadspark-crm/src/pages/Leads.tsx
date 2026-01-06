@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { PageHeader } from '@/components/ui/page-header';
@@ -21,6 +21,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
+  DialogFooter,
 } from '@/components/ui/dialog';
 import {
   Table,
@@ -39,8 +40,8 @@ import { useOptimisticUpdate } from '@/hooks/useOptimisticUpdate';
 import { useOverdueLeads, getOverdueStatus } from '@/hooks/useOverdueLeads';
 import { useAutosave, loadDraft, clearDraft, hasDraft } from '@/hooks/useAutosave';
 import { toast } from 'sonner';
-import { Plus, Building2, Mail, Phone, AlertTriangle, Clock, PhoneCall, Users } from 'lucide-react';
-import { format, parseISO, isAfter, isBefore, startOfDay, endOfDay } from 'date-fns';
+import { Plus, Building2, Mail, Phone, AlertTriangle, Clock, PhoneCall, Users, Calendar } from 'lucide-react';
+import { format, parseISO, isAfter, isBefore, startOfDay, endOfDay, addDays, isWeekend } from 'date-fns';
 import { LeadFilters } from '@/components/leads/LeadFilters';
 import { LeadImportDialog } from '@/components/leads/LeadImportDialog';
 import { InlineEditSelect } from '@/components/leads/InlineEditSelect';
@@ -84,6 +85,15 @@ const defaultFormData: LeadFormData = {
   nextFollowUpDate: '',
 };
 
+// --- UPGRADE SECTION: Helper for Date Suggestion ---
+const getNextBusinessDay = () => {
+  let date = addDays(new Date(), 1);
+  while (isWeekend(date)) {
+    date = addDays(date, 1);
+  }
+  return format(date, 'yyyy-MM-dd');
+};
+
 export default function Leads() {
   const navigate = useNavigate();
   const { isAdmin, user } = useAuth();
@@ -108,6 +118,9 @@ export default function Leads() {
   const [quickCallLead, setQuickCallLead] = useState<Lead | null>(null);
   const [isQuickCallOpen, setIsQuickCallOpen] = useState(false);
 
+  // --- UPGRADE SECTION: Duplicate Prevention State ---
+  const [isDuplicateDialogOpen, setIsDuplicateDialogOpen] = useState(false);
+
   // Optimistic update hook
   const { updateLead, loadingId } = useOptimisticUpdate();
 
@@ -120,6 +133,23 @@ export default function Leads() {
     return draft || defaultFormData;
   });
 
+  // --- UPGRADE SECTION: Form-Level Validation Logic (Reactive) ---
+  const validation = useMemo(() => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const isEmailValid = !formData.email || emailRegex.test(formData.email);
+    const isPhoneValid = !formData.phone || formData.phone.length === 10;
+    const isDateValid = !formData.nextFollowUpDate || !isBefore(parseISO(formData.nextFollowUpDate), startOfDay(new Date()));
+    const isRequiredFilled = formData.leadName.trim() !== '' && formData.companyName.trim() !== '';
+
+    return {
+      isEmailValid,
+      isPhoneValid,
+      isDateValid,
+      isRequiredFilled,
+      isValid: isEmailValid && isPhoneValid && isDateValid && isRequiredFilled
+    };
+  }, [formData]);
+
   // Autosave form data
   useAutosave({
     key: 'lead-create',
@@ -127,16 +157,15 @@ export default function Leads() {
     enabled: isCreateOpen && (formData.leadName !== '' || formData.companyName !== ''),
   });
 
-  // Check for draft on mount - Logic fixed to prevent recurring popup
+  // Check for draft on mount
   useEffect(() => {
     const draft = loadDraft<LeadFormData>('lead-create');
-    // Strictly only show if there is actual content and the dialog is not already open
     const hasActualContent = draft && (draft.leadName.trim() !== '' || draft.companyName.trim() !== '');
     
     if (hasActualContent && isAdmin && !isCreateOpen) {
       const timer = setTimeout(() => {
         toast.info('You have an unsaved lead draft', {
-          id: 'restore-draft-toast', // Prevents duplicate toasts
+          id: 'restore-draft-toast',
           action: {
             label: 'Restore',
             onClick: () => {
@@ -150,7 +179,7 @@ export default function Leads() {
           },
           duration: 5000,
         });
-      }, 1000); // Small delay to ensure page is settled
+      }, 1000);
       return () => clearTimeout(timer);
     }
   }, [isAdmin]);
@@ -190,12 +219,31 @@ export default function Leads() {
     }
   };
 
-  const handleCreateLead = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // --- UPGRADE SECTION: Duplicate Check Logic ---
+  const checkForDuplicate = () => {
+    return leads.find(lead => 
+      (formData.email && lead.email?.toLowerCase() === formData.email.toLowerCase()) ||
+      (formData.phone && lead.phone === formData.phone) ||
+      (lead.companyName.toLowerCase() === formData.companyName.toLowerCase() && 
+       lead.contactPerson?.toLowerCase() === formData.contactPerson?.toLowerCase())
+    );
+  };
+
+  const handleCreateLead = async (e?: React.FormEvent, ignoreDuplicate = false) => {
+    if (e) e.preventDefault();
 
     if (!formData.leadName.trim() || !formData.companyName.trim()) {
       toast.error('Lead name and company name are required');
       return;
+    }
+
+    // --- UPGRADE SECTION: Duplicate Prevention Check ---
+    if (!ignoreDuplicate) {
+      const duplicate = checkForDuplicate();
+      if (duplicate) {
+        setIsDuplicateDialogOpen(true);
+        return;
+      }
     }
 
     const leadData = {
@@ -221,12 +269,10 @@ export default function Leads() {
       console.error(error);
     } else {
       toast.success('Lead created successfully');
-      
-      // FIX: Strict cleanup sequence to prevent re-saving of stale data
-      setIsCreateOpen(false); // 1. Turn off the autosave hook immediately
-      setFormData(defaultFormData); // 2. Reset the local state to empty
-      clearDraft('lead-create'); // 3. Delete from localStorage
-      
+      setIsCreateOpen(false); 
+      setIsDuplicateDialogOpen(false); 
+      setFormData(defaultFormData); 
+      clearDraft('lead-create'); 
       fetchLeads();
     }
   };
@@ -243,6 +289,31 @@ export default function Leads() {
   const handleInlineAssigneeChange = useCallback(async (leadId: number, newAssignee: string) => {
     await updateLead(leadId, { assignee: newAssignee || null }, leads, setLeads);
   }, [leads, updateLead]);
+
+  // --- UPGRADE SECTION: Next Follow-up Update for Existing Leads (TS FIX APPLIED) ---
+  const handleInlineDateChange = async (leadId: number, newDate: string) => {
+    if (newDate && isBefore(parseISO(newDate), startOfDay(new Date()))) {
+      toast.error("Follow-up date cannot be in the past");
+      return;
+    }
+
+    // Use manual optimistic update to bypass restricted updateLead hook types
+    const originalLeads = [...leads];
+    setLeads(prev => prev.map(l => l.id === leadId ? { ...l, nextFollowUpDate: newDate || null } : l));
+
+    const { error } = await supabase
+      .from('Lead')
+      .update({ nextFollowUpDate: newDate || null })
+      .eq('id', leadId);
+
+    if (error) {
+      setLeads(originalLeads); // Rollback on error
+      toast.error('Failed to update follow-up date');
+      console.error(error);
+    } else {
+      toast.success('Follow-up date updated');
+    }
+  };
 
   // Bulk selection handlers
   const toggleLeadSelection = (leadId: number) => {
@@ -269,7 +340,6 @@ export default function Leads() {
     return leads.filter(l => selectedLeads.has(l.id));
   };
 
-  // Filter leads with date range support
   const filteredLeads = leads.filter((lead) => {
     const matchesSearch =
       searchQuery === '' ||
@@ -285,7 +355,6 @@ export default function Leads() {
       (assigneeFilter === 'unassigned' && !lead.assignee) ||
       lead.assignee === assigneeFilter;
 
-    // Date range filter
     let matchesDateRange = true;
     if (lead.createdAt) {
       const leadDate = parseISO(lead.createdAt);
@@ -309,7 +378,6 @@ export default function Leads() {
     toast.success(`Exported ${filteredLeads.length} lead(s)`);
   };
 
-  // Get row class based on overdue status
   const getRowClassName = (lead: Lead) => {
     const status = getOverdueStatus(lead);
     if (status === 'overdue') return 'bg-destructive/5 hover:bg-destructive/10';
@@ -317,7 +385,6 @@ export default function Leads() {
     return '';
   };
 
-  // Check if user can edit a lead
   const canEditLead = (lead: Lead) => {
     if (isAdmin) return true;
     return lead.assignee === user?.email;
@@ -331,7 +398,6 @@ export default function Leads() {
           description={isAdmin ? 'Manage all leads in the system' : 'Leads assigned to you'}
           actions={
             <div className="flex items-center gap-2">
-              {/* Overdue indicators */}
               {overdueCount > 0 && (
                 <Badge variant="destructive" className="flex items-center gap-1">
                   <AlertTriangle className="w-3 h-3" />
@@ -345,7 +411,6 @@ export default function Leads() {
                 </Badge>
               )}
               
-              {/* Bulk actions */}
               {isAdmin && selectedLeads.size > 0 && (
                 <Button variant="outline" onClick={() => setIsBulkReassignOpen(true)}>
                   <Users className="w-4 h-4 mr-2" />
@@ -413,7 +478,8 @@ export default function Leads() {
                           />
                         </div>
                         <div className="space-y-2">
-                          <Label htmlFor="email">Email</Label>
+                          {/* UPGRADE SECTION: Visual Feedback for Email Validation */}
+                          <Label htmlFor="email" className={!validation.isEmailValid ? "text-destructive" : ""}>Email</Label>
                           <Input
                             id="email"
                             type="email"
@@ -422,21 +488,32 @@ export default function Leads() {
                               setFormData({ ...formData, email: e.target.value })
                             }
                             placeholder="email@company.com"
+                            className={!validation.isEmailValid ? "border-destructive focus-visible:ring-destructive" : ""}
                           />
+                          {!validation.isEmailValid && (
+                            <p className="text-[0.8rem] font-medium text-destructive">Invalid email format</p>
+                          )}
                         </div>
                       </div>
 
                       <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-2">
-                          <Label htmlFor="phone">Phone</Label>
+                          {/* UPGRADE SECTION: Phone Number UX Enhancements */}
+                          <Label htmlFor="phone" className={!validation.isPhoneValid && formData.phone ? "text-destructive" : ""}>Phone</Label>
                           <Input
                             id="phone"
                             value={formData.phone}
                             onChange={(e) =>
-                              setFormData({ ...formData, phone: e.target.value })
+                              setFormData({ ...formData, phone: e.target.value.replace(/\D/g, '').slice(0, 10) })
                             }
-                            placeholder="+1 234 567 8900"
+                            placeholder="10-digit mobile number"
+                            className={!validation.isPhoneValid && formData.phone ? "border-destructive focus-visible:ring-destructive" : ""}
                           />
+                          <p className={cn("text-[0.8rem] text-muted-foreground", !validation.isPhoneValid && formData.phone && "text-destructive font-medium")}>
+                            {!validation.isPhoneValid && formData.phone 
+                              ? "Phone number must be exactly 10 digits" 
+                              : "Enter a valid 10-digit Indian mobile number"}
+                          </p>
                         </div>
                         <div className="space-y-2">
                           <Label htmlFor="leadSource">Lead Source</Label>
@@ -540,15 +617,31 @@ export default function Leads() {
                       </div>
 
                       <div className="space-y-2">
-                        <Label htmlFor="nextFollowUpDate">Next Follow-up Date</Label>
+                        {/* UPGRADE SECTION: Follow-up Date UX Improvements */}
+                        <div className="flex justify-between items-end">
+                          <Label htmlFor="nextFollowUpDate" className={!validation.isDateValid ? "text-destructive" : ""}>Next Follow-up Date</Label>
+                          <Button 
+                            type="button" 
+                            variant="link" 
+                            className="h-auto p-0 text-xs"
+                            onClick={() => setFormData({ ...formData, nextFollowUpDate: getNextBusinessDay() })}
+                          >
+                            Suggest next business day
+                          </Button>
+                        </div>
                         <Input
                           id="nextFollowUpDate"
                           type="date"
+                          min={format(new Date(), 'yyyy-MM-dd')}
                           value={formData.nextFollowUpDate}
                           onChange={(e) =>
                             setFormData({ ...formData, nextFollowUpDate: e.target.value })
                           }
+                          className={!validation.isDateValid ? "border-destructive focus-visible:ring-destructive" : ""}
                         />
+                        {!validation.isDateValid && (
+                          <p className="text-[0.8rem] font-medium text-destructive">Follow-up date cannot be in the past</p>
+                        )}
                       </div>
 
                       <div className="space-y-2">
@@ -572,7 +665,10 @@ export default function Leads() {
                         >
                           Cancel
                         </Button>
-                        <Button type="submit">Create Lead</Button>
+                        {/* UPGRADE SECTION: Reactive Create Button State */}
+                        <Button type="submit" disabled={!validation.isValid}>
+                          Create Lead
+                        </Button>
                       </div>
                     </form>
                   </DialogContent>
@@ -581,6 +677,30 @@ export default function Leads() {
             </div>
           }
         />
+
+        {/* --- UPGRADE SECTION: Duplicate Prevention Dialog --- */}
+        <Dialog open={isDuplicateDialogOpen} onOpenChange={setIsDuplicateDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <div className="flex items-center gap-2 text-warning mb-2">
+                <AlertTriangle className="w-5 h-5" />
+                <DialogTitle>Possible Duplicate Lead</DialogTitle>
+              </div>
+              <DialogDescription className="space-y-2">
+                <p>A lead with the same <strong>Email</strong>, <strong>Phone</strong>, or <strong>Company/Contact</strong> combination already exists in the system.</p>
+                <p>Would you like to proceed and create this lead anyway?</p>
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button variant="outline" onClick={() => setIsDuplicateDialogOpen(false)}>
+                Cancel & Review
+              </Button>
+              <Button variant="destructive" onClick={() => handleCreateLead(undefined, true)}>
+                Create duplicate lead anyway
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Enhanced Filters */}
         <LeadFilters
@@ -728,12 +848,18 @@ export default function Leads() {
                           </span>
                         )}
                       </TableCell>
-                      <TableCell>
-                        <span className="text-sm text-muted-foreground">
-                          {lead.nextFollowUpDate
-                            ? format(parseISO(lead.nextFollowUpDate), 'MMM d, yyyy')
-                            : '-'}
-                        </span>
+                      {/* --- UPGRADE SECTION: Inline Follow-up Update for Existing Leads --- */}
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center gap-2 group max-w-[140px]">
+                          <Input
+                            type="date"
+                            min={format(new Date(), 'yyyy-MM-dd')}
+                            defaultValue={lead.nextFollowUpDate || ''}
+                            disabled={!canEdit}
+                            onChange={(e) => handleInlineDateChange(lead.id, e.target.value)}
+                            className="h-8 text-xs p-1 bg-transparent border-transparent group-hover:border-input focus:bg-background transition-all"
+                          />
+                        </div>
                       </TableCell>
                       <TableCell onClick={(e) => e.stopPropagation()}>
                         <Button
@@ -756,14 +882,12 @@ export default function Leads() {
           </Table>
         </div>
 
-        {/* Import Dialog */}
         <LeadImportDialog
           open={isImportOpen}
           onOpenChange={setIsImportOpen}
           onSuccess={fetchLeads}
         />
 
-        {/* Quick Call Log Dialog */}
         <QuickCallLogDialog
           lead={quickCallLead}
           open={isQuickCallOpen}
@@ -771,7 +895,6 @@ export default function Leads() {
           onSuccess={fetchLeads}
         />
 
-        {/* Bulk Reassign Dialog */}
         <BulkReassignDialog
           leads={getSelectedLeadObjects()}
           users={users}
