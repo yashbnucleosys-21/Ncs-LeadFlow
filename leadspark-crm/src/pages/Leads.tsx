@@ -24,6 +24,16 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Table,
   TableBody,
   TableCell,
@@ -40,7 +50,7 @@ import { useOptimisticUpdate } from '@/hooks/useOptimisticUpdate';
 import { useOverdueLeads, getOverdueStatus } from '@/hooks/useOverdueLeads';
 import { useAutosave, loadDraft, clearDraft, hasDraft } from '@/hooks/useAutosave';
 import { toast } from 'sonner';
-import { Plus, Building2, Mail, Phone, AlertTriangle, Clock, PhoneCall, Users, Calendar, Filter } from 'lucide-react';
+import { Plus, Building2, Mail, Phone, AlertTriangle, Clock, PhoneCall, Users, Calendar, Filter, Trash2 } from 'lucide-react';
 import { format, parseISO, isAfter, isBefore, startOfDay, endOfDay, addDays, isWeekend } from 'date-fns';
 import { LeadFilters } from '@/components/leads/LeadFilters';
 import { LeadImportDialog } from '@/components/leads/LeadImportDialog';
@@ -110,17 +120,20 @@ export default function Leads() {
   const [dateTo, setDateTo] = useState<Date | undefined>();
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isImportOpen, setIsImportOpen] = useState(false);
-
+  
   // --- UPGRADE SECTION: Fix for recurring Restore popup ---
   const [hasCheckedDraft, setHasCheckedDraft] = useState(false);
-
+  
   // Bulk selection state
   const [selectedLeads, setSelectedLeads] = useState<Set<number>>(new Set());
   const [isBulkReassignOpen, setIsBulkReassignOpen] = useState(false);
-
+  
   // Quick call log state
   const [quickCallLead, setQuickCallLead] = useState<Lead | null>(null);
   const [isQuickCallOpen, setIsQuickCallOpen] = useState(false);
+
+  // --- UPGRADE SECTION: Delete State ---
+  const [leadToDelete, setLeadToDelete] = useState<number | null>(null);
 
   // --- UPGRADE SECTION: Duplicate Prevention State ---
   const [isDuplicateDialogOpen, setIsDuplicateDialogOpen] = useState(false);
@@ -137,10 +150,11 @@ export default function Leads() {
     return draft || defaultFormData;
   });
 
-  // --- UPGRADE SECTION: Form-Level Validation Logic (Reactive) ---
+  // --- UPGRADE SECTION: Form-Level Validation Logic (Updated to allow "NA") ---
   const validation = useMemo(() => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    const isEmailValid = !formData.email || emailRegex.test(formData.email);
+    // logic: Valid if Empty OR literal "NA" OR matches email regex
+    const isEmailValid = !formData.email || formData.email === 'NA' || emailRegex.test(formData.email);
     const isPhoneValid = !formData.phone || formData.phone.length === 10;
     const isDateValid = !formData.nextFollowUpDate || !isBefore(parseISO(formData.nextFollowUpDate), startOfDay(new Date()));
     const isRequiredFilled = formData.leadName.trim() !== '' && formData.companyName.trim() !== '';
@@ -165,7 +179,7 @@ export default function Leads() {
   useEffect(() => {
     const draft = loadDraft<LeadFormData>('lead-create');
     const hasActualContent = draft && (draft.leadName.trim() !== '' || draft.companyName.trim() !== '');
-
+    
     if (hasActualContent && !hasCheckedDraft && !isCreateOpen) {
       const timer = setTimeout(() => {
         toast.info('You have an unsaved lead draft', {
@@ -222,13 +236,13 @@ export default function Leads() {
     }
   };
 
-  // --- UPGRADE SECTION: Duplicate Check Logic ---
+  // --- UPGRADE SECTION: Duplicate Check Logic (Updated to ignore "NA" email) ---
   const checkForDuplicate = () => {
-    return leads.find(lead =>
-      (formData.email && lead.email?.toLowerCase() === formData.email.toLowerCase()) ||
+    return leads.find(lead => 
+      (formData.email && formData.email !== 'NA' && lead.email?.toLowerCase() === formData.email.toLowerCase()) ||
       (formData.phone && lead.phone === formData.phone) ||
-      (lead.companyName.toLowerCase() === formData.companyName.toLowerCase() &&
-        lead.contactPerson?.toLowerCase() === formData.contactPerson?.toLowerCase())
+      (lead.companyName.toLowerCase() === formData.companyName.toLowerCase() && 
+       lead.contactPerson?.toLowerCase() === formData.contactPerson?.toLowerCase())
     );
   };
 
@@ -273,11 +287,30 @@ export default function Leads() {
     } else {
       toast.success('Lead created successfully');
       // --- UPGRADE SECTION: Sequence of cleanup to prevent autosave from re-triggering ---
-      setIsCreateOpen(false);
-      setIsDuplicateDialogOpen(false);
-      setFormData(defaultFormData);
-      clearDraft('lead-create');
+      setIsCreateOpen(false); 
+      setIsDuplicateDialogOpen(false); 
+      setFormData(defaultFormData); 
+      clearDraft('lead-create'); 
       fetchLeads();
+    }
+  };
+
+  // --- UPGRADE SECTION: Delete Handler ---
+  const handleDeleteLead = async () => {
+    if (!leadToDelete) return;
+
+    const { error } = await supabase
+      .from('Lead')
+      .delete()
+      .eq('id', leadToDelete);
+
+    if (error) {
+      toast.error('Failed to delete lead');
+      console.error(error);
+    } else {
+      toast.success('Lead deleted successfully');
+      setLeads(prev => prev.filter(l => l.id !== leadToDelete));
+      setLeadToDelete(null);
     }
   };
 
@@ -439,7 +472,7 @@ export default function Leads() {
               }}>
                 <DialogTrigger asChild>
                   <Button className="shadow-md gap-2">
-                    <Plus className="w-4 h-4 mr-2" />
+                    <Plus className="w-4 h-4" />
                     Add Lead
                   </Button>
                 </DialogTrigger>
@@ -489,20 +522,30 @@ export default function Leads() {
                         />
                       </div>
                       <div className="space-y-2">
-                        {/* UPGRADE SECTION: Visual Feedback for Email Validation */}
-                        <Label htmlFor="email" className={!validation.isEmailValid ? "text-destructive" : ""}>Email</Label>
+                        {/* --- UPGRADE SECTION: Email Section with NA Option and Validation --- */}
+                        <div className="flex justify-between items-end">
+                          <Label htmlFor="email" className={!validation.isEmailValid ? "text-destructive" : ""}>Email</Label>
+                          <Button 
+                            type="button" 
+                            variant="link" 
+                            className="h-auto p-0 text-[10px] font-bold uppercase tracking-tight text-primary"
+                            onClick={() => setFormData({ ...formData, email: 'NA' })}
+                          >
+                            Mark as NA
+                          </Button>
+                        </div>
                         <Input
                           id="email"
-                          type="email"
+                          type="text"
                           value={formData.email}
                           onChange={(e) =>
                             setFormData({ ...formData, email: e.target.value })
                           }
-                          placeholder="email@company.com"
+                          placeholder="email@company.com or NA"
                           className={!validation.isEmailValid ? "border-destructive focus-visible:ring-destructive" : ""}
                         />
                         {!validation.isEmailValid && (
-                          <p className="text-[0.8rem] font-medium text-destructive">Invalid email format</p>
+                          <p className="text-[0.8rem] font-medium text-destructive">Enter valid email or NA</p>
                         )}
                       </div>
                     </div>
@@ -688,6 +731,24 @@ export default function Leads() {
           }
         />
 
+        {/* --- UPGRADE SECTION: Delete Confirmation Dialog --- */}
+        <AlertDialog open={!!leadToDelete} onOpenChange={(open) => !open && setLeadToDelete(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This action cannot be undone. This will permanently delete the lead and all its history.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={handleDeleteLead} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                Delete Lead
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
         {/* --- UPGRADE SECTION: Duplicate Prevention Dialog --- */}
         <Dialog open={isDuplicateDialogOpen} onOpenChange={setIsDuplicateDialogOpen}>
           <DialogContent>
@@ -696,18 +757,13 @@ export default function Leads() {
                 <AlertTriangle className="w-5 h-5" />
                 <DialogTitle>Possible Duplicate Lead</DialogTitle>
               </div>
-              <DialogDescription className="space-y-2">
-                <p>A lead with the same <strong>Email</strong>, <strong>Phone</strong>, or <strong>Company/Contact</strong> combination already exists in the system.</p>
-                <p>Would you like to proceed and create this lead anyway?</p>
+              <DialogDescription>
+                A lead with this data already exists. Proceed anyway?
               </DialogDescription>
             </DialogHeader>
             <DialogFooter className="gap-2 sm:gap-0">
-              <Button variant="outline" onClick={() => setIsDuplicateDialogOpen(false)}>
-                Cancel & Review
-              </Button>
-              <Button variant="destructive" onClick={() => handleCreateLead(undefined, true)}>
-                Create duplicate lead anyway
-              </Button>
+              <Button variant="outline" onClick={() => setIsDuplicateDialogOpen(false)}>Review</Button>
+              <Button variant="destructive" onClick={() => handleCreateLead(undefined, true)}>Create Duplicate</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -715,22 +771,14 @@ export default function Leads() {
         {/* Enhanced Filters Section */}
         <div className="bg-card/50 backdrop-blur-sm border rounded-xl p-1 shadow-sm">
           <LeadFilters
-            searchQuery={searchQuery}
-            setSearchQuery={setSearchQuery}
-            statusFilter={statusFilter}
-            setStatusFilter={setStatusFilter}
-            priorityFilter={priorityFilter}
-            setPriorityFilter={setPriorityFilter}
-            assigneeFilter={assigneeFilter}
-            setAssigneeFilter={setAssigneeFilter}
-            dateFrom={dateFrom}
-            setDateFrom={setDateFrom}
-            dateTo={dateTo}
-            setDateTo={setDateTo}
-            users={users}
-            isAdmin={isAdmin}
-            onExport={handleExport}
-            onImport={() => setIsImportOpen(true)}
+            searchQuery={searchQuery} setSearchQuery={setSearchQuery}
+            statusFilter={statusFilter} setStatusFilter={setStatusFilter}
+            priorityFilter={priorityFilter} setPriorityFilter={setPriorityFilter}
+            assigneeFilter={assigneeFilter} setAssigneeFilter={setAssigneeFilter}
+            dateFrom={dateFrom} setDateFrom={setDateFrom}
+            dateTo={dateTo} setDateTo={setDateTo}
+            users={users} isAdmin={isAdmin}
+            onExport={handleExport} onImport={() => setIsImportOpen(true)}
             resultCount={filteredLeads.length}
           />
         </div>
@@ -754,7 +802,7 @@ export default function Leads() {
                 <TableHead className="font-semibold uppercase text-[11px] tracking-wider text-muted-foreground">Priority</TableHead>
                 <TableHead className="font-semibold uppercase text-[11px] tracking-wider text-muted-foreground">Assignee</TableHead>
                 <TableHead className="font-semibold uppercase text-[11px] tracking-wider text-muted-foreground">Next Follow-up</TableHead>
-                <TableHead className="w-12"></TableHead>
+                <TableHead className="w-24 font-semibold uppercase text-[11px] tracking-wider text-muted-foreground">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -865,17 +913,28 @@ export default function Leads() {
                         />
                       </TableCell>
                       <TableCell className="pr-4" onClick={(e) => e.stopPropagation()}>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 hover:bg-primary/10 hover:text-primary transition-colors"
-                          onClick={() => {
-                            setQuickCallLead(lead);
-                            setIsQuickCallOpen(true);
-                          }}
-                        >
-                          <PhoneCall className="w-4 h-4" />
-                        </Button>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 hover:bg-primary/10 hover:text-primary transition-colors"
+                            onClick={() => {
+                              setQuickCallLead(lead);
+                              setIsQuickCallOpen(true);
+                            }}
+                          >
+                            <PhoneCall className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 hover:bg-destructive/10 hover:text-destructive transition-colors"
+                            disabled={!canEdit}
+                            onClick={() => setLeadToDelete(lead.id)}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   );
