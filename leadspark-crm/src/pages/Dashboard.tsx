@@ -225,6 +225,89 @@ export default function Dashboard() {
           </Card>
         </div>
 
+        {/* Lists Row */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Recent Leads */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle className="text-lg font-display">Recent Leads</CardTitle>
+              <button
+                onClick={() => navigate('/leads')}
+                className="text-sm text-primary hover:underline flex items-center gap-1"
+              >
+                View all <ArrowRight className="w-4 h-4" />
+              </button>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="divide-y">
+                {recentLeads.map((lead) => (
+                  <div
+                    key={lead.id}
+                    onClick={() => navigate(`/leads/${lead.id}`)}
+                    className="flex items-center justify-between p-4 hover:bg-muted/50 cursor-pointer transition-colors"
+                  >
+                    <div>
+                      <p className="font-medium text-foreground">{lead.leadName}</p>
+                      <p className="text-sm text-muted-foreground">{lead.companyName}</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <StatusBadge status={lead.status} />
+                      <PriorityBadge priority={lead.priority} />
+                    </div>
+                  </div>
+                ))}
+                {recentLeads.length === 0 && (
+                  <div className="p-8 text-center text-muted-foreground">
+                    No leads yet. Create your first lead to get started.
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Upcoming Follow-ups */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg font-display">Upcoming Follow-ups</CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="divide-y">
+                {upcomingFollowUps.map((lead) => (
+                  <div
+                    key={lead.id}
+                    onClick={() => navigate(`/leads/${lead.id}`)}
+                    className="flex items-center justify-between p-4 hover:bg-muted/50 cursor-pointer transition-colors"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div
+                        className={`p-2 rounded-lg ${
+                          isToday(parseISO(lead.nextFollowUpDate!))
+                            ? 'bg-warning/10 text-warning'
+                            : 'bg-muted text-muted-foreground'
+                        }`}
+                      >
+                        <Clock className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <p className="font-medium text-foreground">{lead.leadName}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {format(parseISO(lead.nextFollowUpDate!), 'MMM d, yyyy')}
+                        </p>
+                      </div>
+                    </div>
+                    <StatusBadge status={lead.status} />
+                  </div>
+                ))}
+                {upcomingFollowUps.length === 0 && (
+                  <div className="p-8 text-center text-muted-foreground">
+                    No upcoming follow-ups scheduled.
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
         {/* Leads Trend Chart */}
         <Card>
           <CardHeader>
@@ -326,89 +409,6 @@ export default function Dashboard() {
                     />
                   </BarChart>
                 </ResponsiveContainer>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Lists Row */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Recent Leads */}
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="text-lg font-display">Recent Leads</CardTitle>
-              <button
-                onClick={() => navigate('/leads')}
-                className="text-sm text-primary hover:underline flex items-center gap-1"
-              >
-                View all <ArrowRight className="w-4 h-4" />
-              </button>
-            </CardHeader>
-            <CardContent className="p-0">
-              <div className="divide-y">
-                {recentLeads.map((lead) => (
-                  <div
-                    key={lead.id}
-                    onClick={() => navigate(`/leads/${lead.id}`)}
-                    className="flex items-center justify-between p-4 hover:bg-muted/50 cursor-pointer transition-colors"
-                  >
-                    <div>
-                      <p className="font-medium text-foreground">{lead.leadName}</p>
-                      <p className="text-sm text-muted-foreground">{lead.companyName}</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <StatusBadge status={lead.status} />
-                      <PriorityBadge priority={lead.priority} />
-                    </div>
-                  </div>
-                ))}
-                {recentLeads.length === 0 && (
-                  <div className="p-8 text-center text-muted-foreground">
-                    No leads yet. Create your first lead to get started.
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Upcoming Follow-ups */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg font-display">Upcoming Follow-ups</CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
-              <div className="divide-y">
-                {upcomingFollowUps.map((lead) => (
-                  <div
-                    key={lead.id}
-                    onClick={() => navigate(`/leads/${lead.id}`)}
-                    className="flex items-center justify-between p-4 hover:bg-muted/50 cursor-pointer transition-colors"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div
-                        className={`p-2 rounded-lg ${
-                          isToday(parseISO(lead.nextFollowUpDate!))
-                            ? 'bg-warning/10 text-warning'
-                            : 'bg-muted text-muted-foreground'
-                        }`}
-                      >
-                        <Clock className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <p className="font-medium text-foreground">{lead.leadName}</p>
-                        <p className="text-sm text-muted-foreground">
-                          {format(parseISO(lead.nextFollowUpDate!), 'MMM d, yyyy')}
-                        </p>
-                      </div>
-                    </div>
-                    <StatusBadge status={lead.status} />
-                  </div>
-                ))}
-                {upcomingFollowUps.length === 0 && (
-                  <div className="p-8 text-center text-muted-foreground">
-                    No upcoming follow-ups scheduled.
-                  </div>
-                )}
               </div>
             </CardContent>
           </Card>

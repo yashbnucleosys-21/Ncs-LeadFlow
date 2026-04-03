@@ -120,14 +120,14 @@ export default function Leads() {
   const [dateTo, setDateTo] = useState<Date | undefined>();
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isImportOpen, setIsImportOpen] = useState(false);
-  
+
   // --- UPGRADE SECTION: Fix for recurring Restore popup ---
   const [hasCheckedDraft, setHasCheckedDraft] = useState(false);
-  
+
   // Bulk selection state
   const [selectedLeads, setSelectedLeads] = useState<Set<number>>(new Set());
   const [isBulkReassignOpen, setIsBulkReassignOpen] = useState(false);
-  
+
   // Quick call log state
   const [quickCallLead, setQuickCallLead] = useState<Lead | null>(null);
   const [isQuickCallOpen, setIsQuickCallOpen] = useState(false);
@@ -179,7 +179,7 @@ export default function Leads() {
   useEffect(() => {
     const draft = loadDraft<LeadFormData>('lead-create');
     const hasActualContent = draft && (draft.leadName.trim() !== '' || draft.companyName.trim() !== '');
-    
+
     if (hasActualContent && !hasCheckedDraft && !isCreateOpen) {
       const timer = setTimeout(() => {
         toast.info('You have an unsaved lead draft', {
@@ -238,11 +238,11 @@ export default function Leads() {
 
   // --- UPGRADE SECTION: Duplicate Check Logic (Updated to ignore "NA" email) ---
   const checkForDuplicate = () => {
-    return leads.find(lead => 
+    return leads.find(lead =>
       (formData.email && formData.email !== 'NA' && lead.email?.toLowerCase() === formData.email.toLowerCase()) ||
       (formData.phone && lead.phone === formData.phone) ||
-      (lead.companyName.toLowerCase() === formData.companyName.toLowerCase() && 
-       lead.contactPerson?.toLowerCase() === formData.contactPerson?.toLowerCase())
+      (lead.companyName.toLowerCase() === formData.companyName.toLowerCase() &&
+        lead.contactPerson?.toLowerCase() === formData.contactPerson?.toLowerCase())
     );
   };
 
@@ -287,10 +287,10 @@ export default function Leads() {
     } else {
       toast.success('Lead created successfully');
       // --- UPGRADE SECTION: Sequence of cleanup to prevent autosave from re-triggering ---
-      setIsCreateOpen(false); 
-      setIsDuplicateDialogOpen(false); 
-      setFormData(defaultFormData); 
-      clearDraft('lead-create'); 
+      setIsCreateOpen(false);
+      setIsDuplicateDialogOpen(false);
+      setFormData(defaultFormData);
+      clearDraft('lead-create');
       fetchLeads();
     }
   };
@@ -420,8 +420,11 @@ export default function Leads() {
   // Get row class based on overdue status
   const getRowClassName = (lead: Lead) => {
     const status = getOverdueStatus(lead);
-    if (status === 'overdue') return 'bg-destructive/[0.03] hover:bg-destructive/[0.06]';
-    if (status === 'due-today') return 'bg-warning/[0.03] hover:bg-warning/[0.06]';
+    if (status === 'overdue')
+      return 'bg-red-50 hover:bg-red-90 dark:bg-red-950/30';
+
+    if (status === 'due-today')
+      return 'bg-yellow-50 hover:bg-yellow-90 dark:bg-yellow-950/30';
     return 'hover:bg-muted/50';
   };
 
@@ -525,9 +528,9 @@ export default function Leads() {
                         {/* --- UPGRADE SECTION: Email Section with NA Option and Validation --- */}
                         <div className="flex justify-between items-end">
                           <Label htmlFor="email" className={!validation.isEmailValid ? "text-destructive" : ""}>Email</Label>
-                          <Button 
-                            type="button" 
-                            variant="link" 
+                          <Button
+                            type="button"
+                            variant="link"
                             className="h-auto p-0 text-[10px] font-bold uppercase tracking-tight text-primary"
                             onClick={() => setFormData({ ...formData, email: 'NA' })}
                           >
@@ -906,7 +909,11 @@ export default function Leads() {
                         <Input
                           type="date"
                           min={format(new Date(), 'yyyy-MM-dd')}
-                          defaultValue={lead.nextFollowUpDate || ''}
+                          value={
+                            lead.nextFollowUpDate
+                              ? format(parseISO(lead.nextFollowUpDate), 'yyyy-MM-dd')
+                              : ''
+                          }
                           disabled={!canEdit}
                           onChange={(e) => handleInlineDateChange(lead.id, e.target.value)}
                           className="h-8 text-xs p-1 bg-transparent border-transparent hover:border-input focus:bg-background transition-all"
