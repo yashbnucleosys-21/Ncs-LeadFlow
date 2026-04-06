@@ -6,6 +6,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { supabase } from '@/integrations/supabase/client';
 import { Lead, User } from '@/types/database';
 import { StatusBadge, PriorityBadge } from '@/components/ui/status-badge';
+// Added Dialog components for the follow-up list upgrade
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Briefcase,
   Users,
@@ -15,8 +22,9 @@ import {
   ArrowRight,
   Target,
   AlertTriangle,
+  ExternalLink, // Added for the list item upgrade
 } from 'lucide-react';
-import { format, isToday, parseISO, subDays, startOfDay, isAfter } from 'date-fns';
+import { format, isToday, parseISO, subDays, startOfDay, isAfter, isBefore } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
 import {
   BarChart,
@@ -50,6 +58,9 @@ export default function Dashboard() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  
+  // Added state for the today's follow-up modal upgrade
+  const [isFollowUpModalOpen, setIsFollowUpModalOpen] = useState(false);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -73,9 +84,13 @@ export default function Dashboard() {
   const inPipelineLeads = leads.filter((l) => !['Won', 'Lost'].includes(l.status)).length;
   const conversionRate = totalLeads > 0 ? Math.round((wonLeads / totalLeads) * 100) : 0;
   const activeUsers = users.filter((u) => u.status === 'active').length;
-  const todayFollowUps = leads.filter(
+  
+  // Filter leads specifically for today's follow-ups (used for metric and modal)
+  const todaysFollowUpLeads = leads.filter(
     (l) => l.nextFollowUpDate && isToday(parseISO(l.nextFollowUpDate))
-  ).length;
+  );
+  const todayFollowUps = todaysFollowUpLeads.length;
+
   const urgentLeads = leads.filter((l) => l.priority === 'Urgent' && !['Won', 'Lost'].includes(l.status)).length;
 
   // Status distribution for pie chart
@@ -130,9 +145,12 @@ export default function Dashboard() {
   // Recent leads
   const recentLeads = leads.slice(0, 5);
 
-  // Upcoming follow-ups
+  // Upgraded upcomingFollowUps logic: Include Today and Future (excluding past)
   const upcomingFollowUps = leads
-    .filter((l) => l.nextFollowUpDate && isAfter(parseISO(l.nextFollowUpDate), startOfDay(new Date())))
+    .filter((l) => 
+      l.nextFollowUpDate && 
+      !isBefore(parseISO(l.nextFollowUpDate), startOfDay(new Date()))
+    )
     .sort((a, b) => 
       new Date(a.nextFollowUpDate!).getTime() - new Date(b.nextFollowUpDate!).getTime()
     )
@@ -168,14 +186,71 @@ export default function Dashboard() {
             iconClassName="bg-success/10"
             className="animate-slide-up"
           />
-          <MetricCard
-            title="Today's Follow-ups"
-            value={todayFollowUps}
-            icon={Calendar}
-            iconClassName="bg-warning/10"
-            className="animate-slide-up"
-          />
+          
+          {/* Upgraded Follow-ups Card with Blink and Click functionality */}
+          <div 
+            onClick={() => todayFollowUps > 0 && setIsFollowUpModalOpen(true)}
+            className={`transition-all duration-300 ${todayFollowUps > 0 ? 'cursor-pointer hover:scale-[1.02] active:scale-[0.98]' : ''}`}
+          >
+            <MetricCard
+              title="Today's Follow-ups"
+              value={todayFollowUps}
+              icon={Calendar}
+              iconClassName="bg-warning/10"
+              className={`animate-slide-up ${
+                todayFollowUps > 0 
+                  ? 'ring-2 ring-warning/30 animate-pulse-subtle bg-warning/5 border-warning/50' 
+                  : ''
+              }`}
+            />
+            {/* Added Animation Style for the blink upgrade */}
+            <style dangerouslySetInnerHTML={{ __html: `
+              @keyframes pulse-subtle {
+                0%, 100% { opacity: 1; transform: scale(1); }
+                50% { opacity: 0.85; transform: scale(1.005); border-color: rgba(245, 158, 11, 0.6); }
+              }
+              .animate-pulse-subtle {
+                animation: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+              }
+            `}} />
+          </div>
         </div>
+
+        {/* Added Follow-up Details Modal Upgrade */}
+        <Dialog open={isFollowUpModalOpen} onOpenChange={setIsFollowUpModalOpen}>
+          <DialogContent className="sm:max-w-[500px]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Calendar className="w-5 h-5 text-warning" />
+                Today's Follow-ups ({todayFollowUps})
+              </DialogTitle>
+            </DialogHeader>
+            <div className="mt-4 space-y-3 max-h-[60vh] overflow-y-auto pr-2">
+              {todaysFollowUpLeads.map((lead) => (
+                <div
+                  key={lead.id}
+                  onClick={() => {
+                    setIsFollowUpModalOpen(false);
+                    navigate(`/leads/${lead.id}`);
+                  }}
+                  className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 cursor-pointer transition-colors group"
+                >
+                  <div className="space-y-1">
+                    <p className="font-medium flex items-center gap-2">
+                      {lead.leadName}
+                      <ExternalLink className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </p>
+                    <p className="text-sm text-muted-foreground">{lead.companyName}</p>
+                  </div>
+                  <div className="flex flex-col items-end gap-2">
+                    <StatusBadge status={lead.status} />
+                    <PriorityBadge priority={lead.priority} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </DialogContent>
+        </Dialog>
 
         {/* Quick Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -265,7 +340,7 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          {/* Upcoming Follow-ups */}
+          {/* Upcoming Follow-ups (Now including Today's leads) */}
           <Card>
             <CardHeader>
               <CardTitle className="text-lg font-display">Upcoming Follow-ups</CardTitle>
@@ -289,7 +364,12 @@ export default function Dashboard() {
                         <Clock className="w-4 h-4" />
                       </div>
                       <div>
-                        <p className="font-medium text-foreground">{lead.leadName}</p>
+                        <p className="font-medium text-foreground">
+                          {lead.leadName}
+                          {isToday(parseISO(lead.nextFollowUpDate!)) && (
+                            <span className="ml-2 text-[10px] uppercase tracking-wider bg-warning/20 px-1.5 py-0.5 rounded text-warning-foreground font-bold">Today</span>
+                          )}
+                        </p>
                         <p className="text-sm text-muted-foreground">
                           {format(parseISO(lead.nextFollowUpDate!), 'MMM d, yyyy')}
                         </p>
